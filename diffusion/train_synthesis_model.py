@@ -290,7 +290,7 @@ def import_model_class_from_model_name_or_path(
 
 
 def parse_args(input_args=None):
-    parser = argparse.ArgumentParser(description="Simple example of a training script.")
+    parser = argparse.ArgumentParser(description="VT-DUDA diffusion fine-tuning.")
     parser.add_argument(
         "--pretrained_model_name_or_path",
         type=str,
@@ -312,22 +312,6 @@ def parse_args(input_args=None):
         help="Revision of pretrained model identifier from huggingface.co/models.",
     )
     parser.add_argument(
-        "--dataset_name",
-        type=str,
-        default=None,
-        help=(
-            "The name of the Dataset (from the HuggingFace hub) containing the training data of instance images (could be your own, possibly private,"
-            " dataset). It can also be a path pointing to a local copy of a dataset in your filesystem,"
-            " or to a folder containing files that Hugging Face Datasets can understand."
-        ),
-    )
-    parser.add_argument(
-        "--dataset_config_name",
-        type=str,
-        default=None,
-        help="The config of the Dataset, leave as None if there's only one config.",
-    )
-    parser.add_argument(
         "--instance_data_dir",
         type=str,
         default=None,
@@ -341,20 +325,6 @@ def parse_args(input_args=None):
         help="The directory where the downloaded models and datasets will be stored.",
     )
 
-    parser.add_argument(
-        "--image_column",
-        type=str,
-        default="image",
-        help="The column of the dataset containing the target image. By "
-        "default, the standard Image Dataset maps out 'file_name' "
-        "to 'image'.",
-    )
-    parser.add_argument(
-        "--caption_column",
-        type=str,
-        default=None,
-        help="The column of the dataset containing the instance prompt for each image",
-    )
 
     parser.add_argument(
         "--repeats",
@@ -897,10 +867,7 @@ def parse_args(input_args=None):
     args.target_domain = args.target_domain or default_target
 
     if args.dataset == "officehome":
-        if args.dataset_name is not None and args.instance_data_dir is not None:
-            raise ValueError("Specify only one of `--dataset_name` or `--instance_data_dir`")
-
-        if args.dataset_name is None and args.instance_data_dir is None:
+        if args.instance_data_dir is None:
                                                                                                                    
             candidate_roots = [
                 os.environ.get("INSTANCE_DIR"),
@@ -928,13 +895,10 @@ def parse_args(input_args=None):
                 )
             else:
                 raise ValueError(
-                    "Specify either `--dataset_name` or `--instance_data_dir`.\n"
+                    "Specify `--instance_data_dir`.\n"
                     "Tried these OfficeHome roots (none existed):\n"
                     + "\n".join([f"  - {c}" for c in candidate_roots])
                 )
-    else:
-                                                                     
-        args.dataset_name = None
 
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:

@@ -26,28 +26,8 @@ from torch.utils.data import DataLoader
 import torch.nn.functional as F
 
                                                                               
-try:
-    import torch.utils.data.dataset as _torch_dataset
-    if not hasattr(_torch_dataset, "T_co"):
-        from typing import TypeVar
-        _torch_dataset.T_co = TypeVar("T_co", covariant=True)
-except Exception as _e:
-    print(f"[warn] failed to apply PyTorch T_co compatibility shim: {_e}")
 
                                                                               
-try:
-    import torchvision.models.resnet as _tv_resnet
-    if not hasattr(_tv_resnet, "model_urls"):
-        _tv_resnet.model_urls = {
-                                                                                        
-            "resnet18": "https://download.pytorch.org/models/resnet18-f37072fd.pth",
-            "resnet34": "https://download.pytorch.org/models/resnet34-b627a593.pth",
-            "resnet50": "https://download.pytorch.org/models/resnet50-0676ba61.pth",
-            "resnet101": "https://download.pytorch.org/models/resnet101-63fe2227.pth",
-            "resnet152": "https://download.pytorch.org/models/resnet152-394f9c45.pth",
-        }
-except Exception as _e:
-    print(f"[warn] failed to apply torchvision model_urls compatibility shim: {_e}")
 
 import utils
 from tllib.self_training.mcc import MinimumClassConfusionLoss, ImageClassifier
@@ -55,7 +35,6 @@ from tllib.utils.data import ForeverDataIterator
 from tllib.utils.metric import accuracy
 from tllib.utils.meter import AverageMeter, ProgressMeter
 from tllib.utils.logger import CompleteLogger
-from tllib.utils.analysis import collect_feature
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -88,8 +67,7 @@ def main(args: argparse.Namespace):
         train_source_dataset, train_target_dataset, val_dataset, test_dataset, num_classes, args.class_names = \
             get_list_datasets(args, train_transform, val_transform, with_domain_id=True)
     else:
-        train_source_dataset, train_target_dataset, val_dataset, test_dataset, num_classes, args.class_names =\
-            utils.get_dataset(args.data, args.root, args.source, args.target, train_transform, val_transform)
+        raise ValueError("Provide --source-list and --target-list for MCC training.")
     train_source_loader = DataLoader(train_source_dataset, batch_size=args.batch_size,
                                      shuffle=True, num_workers=args.workers, drop_last=True)
     train_target_loader = DataLoader(train_target_dataset, batch_size=args.batch_size,
@@ -121,19 +99,6 @@ def main(args: argparse.Namespace):
         classifier.load_state_dict(checkpoint)
 
                         
-    if args.phase == 'analysis':
-                                            
-        feature_extractor = nn.Sequential(classifier.backbone, classifier.pool_layer, classifier.bottleneck).to(device)
-        source_feature = collect_feature(train_source_loader, feature_extractor, device)
-        target_feature = collect_feature(train_target_loader, feature_extractor, device)
-                    
-        tSNE_filename = osp.join(logger.visualize_directory, 'TSNE.pdf')
-        tsne.visualize(source_feature, target_feature, tSNE_filename)
-        print("Saving t-SNE to", tSNE_filename)
-                                                                               
-        A_distance = a_distance.calculate(source_feature, target_feature, device)
-        print("A-distance =", A_distance)
-        return
 
     if args.phase == 'test':
         acc = utils.validate(test_loader, classifier, args, device)
@@ -307,12 +272,9 @@ if __name__ == '__main__':
                         help='whether output per-class accuracy during evaluation')
     parser.add_argument("--log", type=str, default='mcc',
                         help="Where to save logs, checkpoints and debugging images.")
-    parser.add_argument("--phase", type=str, default='train', choices=['train', 'test', 'analysis'],
-                        help="When phase is 'test', only test the model."
-                             "When phase is 'analysis', only analysis the model.")
+    parser.add_argument("--phase", default="train", choices=["train", "test"],
+                        help="Train or evaluate the model.")
     args = parser.parse_args()
     if args.data in DATASET_FILES and not list_inputs_requested(args):
-        parser.error("Dataset-specific MCC loaders are absent from this source package. Use --source-list and --target-list.")
-    if args.phase == 'analysis':
-        parser.error("Feature analysis requires tsne/a_distance modules absent from this source release.")
+        parser.error("Provide --source-list and --target-list.")
     main(args)

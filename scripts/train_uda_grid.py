@@ -1,10 +1,4 @@
-"""Plan or train UDA for every selected DDIM/class-conditioned dataset pair.
-
-Planning is the default and needs only Python's standard library. Use
---prepare-only to validate images and write lists, or --run to train.
-The two generated datasets are concatenated as labeled source data; the real
-target remains the unlabeled adaptation domain and labeled evaluation domain.
-"""
+"""Train UDA on pairs of DDIM and class-conditioned source datasets."""
 
 import argparse
 import itertools

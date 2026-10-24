@@ -35,7 +35,6 @@ from common.utils.data import ForeverDataIterator
 from common.utils.metric import accuracy
 from common.utils.meter import AverageMeter, ProgressMeter
 from common.utils.logger import CompleteLogger
-from common.utils.analysis import collect_feature
 from common.utils.sam import SAM
 
                                                             
@@ -538,28 +537,8 @@ def main(args: argparse.Namespace, eps=0.):
         _load_checkpoint_into_model(classifier, ckpt_path, args=args, strict=True)
 
                                       
-    if args.phase == 'finetune':
-        path = args.weight_path
-        print(f"[INFORMATION] Using the weights stored at {args.weight_path}")
-        classifier.load_state_dict(torch.load(path))
 
                         
-    if args.phase == 'analysis':
-        path = args.weight_path
-        print(f"[INFORMATION] Using the weights stored at {args.weight_path}")
-        classifier.load_state_dict(torch.load(path))
-                                            
-        feature_extractor = nn.Sequential(
-            classifier.backbone, classifier.pool_layer, classifier.bottleneck).to(device)
-        source_feature = collect_feature(
-            train_source_loader, feature_extractor, device)
-        print(source_feature.size())
-        target_feature = collect_feature(
-            train_target_loader, feature_extractor, device)
-        A_distance = a_distance.calculate(
-            source_feature, target_feature, device)
-        print("A-distance =", A_distance)
-        return 1
 
 
     if args.phase == 'test':
@@ -905,17 +884,9 @@ if __name__ == '__main__':
                         help='whether output per-class accuracy during evaluation')
     parser.add_argument("--log", type=str, default='cdan',
                         help="Where to save logs, checkpoints and debugging images.")
-    parser.add_argument("--weight_path", type=str, default='cdan',
-                        help="Path to the saved weights")
-    parser.add_argument("--phase", type=str, default='train',
-                        choices=['train', 'test', 'analysis', 'finetune', 'analysis_distance'],
-                        help="When phase is 'test', only test the model."
-                             "When phase is 'analysis', only analysis the model.")
-    parser.add_argument('--log_results', action='store_true',
-                        help="To log results in wandb")
+    parser.add_argument("--phase", default="train", choices=["train", "test"],
+                        help="Train or evaluate the model.")
     parser.add_argument('--gpu', type=str, default="0", help="GPU ID")
-    parser.add_argument('--log_name', type=str,
-                        default="log", help="log name for wandb")
     parser.add_argument('--rho', type=float, default=0.05, help="GPU ID")
     parser.add_argument('--temperature', default=2.0,
                         type=float, help='parameter temperature scaling')
@@ -928,8 +899,6 @@ if __name__ == '__main__':
                                                                      
     parser.add_argument('maybe_path', nargs='?', help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if args.phase in {'analysis', 'analysis_distance'}:
-        parser.error("Feature analysis requires tsne/a_distance modules absent from this source release.")
                                                                      
     if isinstance(args.root, str) and args.root.strip().lower() == 'root' and args.maybe_path:
         args.root = args.maybe_path

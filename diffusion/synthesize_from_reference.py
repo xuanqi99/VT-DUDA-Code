@@ -368,16 +368,6 @@ def _predict_eps(
 
 
                                                                                      
-OFFICEHOME_CLASSES = [
-    'drill', 'exit sign', 'bottle', 'glasses', 'computer', 'file cabinet', 'shelf', 'toys', 'sink',
-    'laptop', 'kettle', 'folder', 'keyboard', 'flipflops', 'pencil', 'bed', 'hammer', 'toothbrush',
-    'couch', 'bike', 'postit notes', 'mug', 'webcam', 'desk lamp', 'telephone', 'helmet', 'mouse',
-    'pen', 'monitor', 'mop', 'sneakers', 'notebook', 'backpack', 'alarm clock', 'push pin',
-    'paper clip', 'batteries', 'radio', 'fan', 'ruler', 'pan', 'screwdriver', 'trash can', 'printer',
-    'speaker', 'eraser', 'bucket', 'chair', 'calendar', 'calculator', 'flowers', 'lamp shade',
-    'spoon', 'candles', 'clipboards', 'scissors', 'tv', 'curtains', 'fork', 'soda', 'table',
-    'knives', 'oven', 'refrigerator', 'marker'
-]
 
 def _normalize_officehome_label(name: str) -> str:
                                       

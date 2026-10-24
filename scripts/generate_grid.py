@@ -1,11 +1,4 @@
-"""Run the post-finetuning synthesis grid without changing training hyperparameters.
-
-DDIM inversion uses the existing latent blend controlled by invert_noise_scale:
-    start = (1 - noise_level) * source_latent + noise_level * inverted_latent.
-At 1.0 the fully inverted latent is used, rather than independent Gaussian noise.
-The class-condition branch uses a class text prompt and scaled source visual tokens.
-Only final generated images are placed under each variant's image_root.
-"""
+"""Generate the post-fine-tuning DDIM and class-conditioned dataset grid."""
 
 import argparse
 import hashlib

@@ -15,82 +15,30 @@ _THIS_DIR = osp.dirname(__file__)
 _MCC_ROOT = osp.abspath(osp.join(_THIS_DIR, '..', '..', '..'))
 if _MCC_ROOT not in sys.path:
     sys.path.insert(0, _MCC_ROOT)
-import tllib.vision.datasets as datasets
-import tllib.vision.models as models
 from tllib.vision.transforms import ResizeImage
 from tllib.utils.metric import accuracy, ConfusionMatrix
 from tllib.utils.meter import AverageMeter, ProgressMeter
-from tllib.vision.datasets.imagelist import MultipleDomainsDataset
 
 
 def get_model_names():
-    return sorted(
-        name for name in models.__dict__
-        if name.islower() and not name.startswith("__")
-        and callable(models.__dict__[name])
-    ) + timm.list_models()
+    return timm.list_models()
 
 
 def get_model(model_name, pretrain=True):
-    if model_name in models.__dict__:
-                                              
-        backbone = models.__dict__[model_name](pretrained=pretrain)
-    else:
-                                               
-        backbone = timm.create_model(model_name, pretrained=pretrain)
-        try:
-            backbone.out_features = backbone.get_classifier().in_features
-            backbone.reset_classifier(0, '')
-        except:
-            backbone.out_features = backbone.head.in_features
-            backbone.head = nn.Identity()
+    backbone = timm.create_model(model_name, pretrained=pretrain)
+    try:
+        backbone.out_features = backbone.get_classifier().in_features
+        backbone.reset_classifier(0, '')
+    except:
+        backbone.out_features = backbone.head.in_features
+        backbone.head = nn.Identity()
     return backbone
 
 
 def get_dataset_names():
-    return sorted(
-        name for name in datasets.__dict__
-        if not name.startswith("__") and callable(datasets.__dict__[name])
-    ) + ['Digits']
+    return ['Office31', 'OfficeHome', 'VisDA2017']
 
 
-def get_dataset(dataset_name, root, source, target, train_source_transform, val_transform, train_target_transform=None):
-    if train_target_transform is None:
-        train_target_transform = train_source_transform
-    if dataset_name == "Digits":
-        train_source_dataset = datasets.__dict__[source[0]](osp.join(root, source[0]), download=True,
-                                                            transform=train_source_transform)
-        train_target_dataset = datasets.__dict__[target[0]](osp.join(root, target[0]), download=True,
-                                                            transform=train_target_transform)
-        val_dataset = test_dataset = datasets.__dict__[target[0]](osp.join(root, target[0]), split='test',
-                                                                  download=True, transform=val_transform)
-        class_names = datasets.MNIST.get_classes()
-        num_classes = len(class_names)
-    elif dataset_name in datasets.__dict__:
-                                                  
-        dataset = datasets.__dict__[dataset_name]
-
-        def concat_dataset(tasks, start_idx, **kwargs):
-                                                                                    
-            return MultipleDomainsDataset([dataset(task=task, **kwargs) for task in tasks], tasks,
-                                          domain_ids=list(range(start_idx, start_idx + len(tasks))))
-
-        train_source_dataset = concat_dataset(root=root, tasks=source, download=True, transform=train_source_transform,
-                                              start_idx=0)
-        train_target_dataset = concat_dataset(root=root, tasks=target, download=True, transform=train_target_transform,
-                                              start_idx=len(source))
-        val_dataset = concat_dataset(root=root, tasks=target, download=True, transform=val_transform,
-                                     start_idx=len(source))
-                                         
-                                                                                                                          
-                                                                  
-               
-        test_dataset = val_dataset
-        class_names = train_source_dataset.datasets[0].classes
-        num_classes = len(class_names)
-    else:
-        raise NotImplementedError(dataset_name)
-    return train_source_dataset, train_target_dataset, val_dataset, test_dataset, num_classes, class_names
 
 
 def validate(val_loader, model, args, device) -> float:

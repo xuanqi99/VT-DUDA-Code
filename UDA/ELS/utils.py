@@ -7,10 +7,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.transforms as T
 from torch.utils.data import ConcatDataset
-import wandb
                     
 import os
-import shutil
 _THIS_DIR = osp.dirname(__file__)
 if _THIS_DIR not in sys.path:
     sys.path.insert(0, _THIS_DIR)
@@ -32,37 +30,6 @@ def get_model_names():
     ) + timm.list_models()
 
 
-def _verify_resnet101_imagenet_weights(backbone) -> bool:
-    """
-    Best-effort check: compare backbone.conv1.weight with torchvision official ImageNet weights.
-    Returns True if it matches exactly; False otherwise.
-    """
-    try:
-        import torchvision.models as tvm
-        from torchvision.models import ResNet101_Weights
-    except Exception as e:
-        print(f"[warn] Cannot import torchvision ResNet101 weights to verify pretrained: {e}")
-        return False
-
-    if not hasattr(backbone, "conv1"):
-        print("[warn] Backbone has no conv1; cannot verify ResNet101 weights.")
-        return False
-
-                                                        
-    ref = tvm.resnet101(weights=ResNet101_Weights.IMAGENET1K_V1)
-    with torch.no_grad():
-        w = backbone.conv1.weight.detach().cpu()
-        w_ref = ref.conv1.weight.detach().cpu()
-
-                                                                                            
-    ok = torch.equal(w, w_ref)
-    if not ok:
-                                         
-        max_abs = (w - w_ref).abs().max().item()
-        print(f"[warn] resnet101 conv1 weights do NOT match torchvision IMAGENET1K_V1 (max_abs_diff={max_abs:.6g}).")
-    else:
-        print("[info] resnet101 conv1 weights match torchvision IMAGENET1K_V1 (pretrained OK).")
-    return ok
 
 
 def get_model(model_name, pretrain=True):
@@ -80,60 +47,20 @@ def get_model(model_name, pretrain=True):
             backbone.out_features = backbone.head.in_features
             backbone.head = nn.Identity()
                                                     
-    if model_name == "resnet101" and pretrain and os.environ.get("VERIFY_IMAGENET_PRETRAINED", "") == "1":
-        _verify_resnet101_imagenet_weights(backbone)
 
     return backbone
 
 
-def convert_from_wilds_dataset(wild_dataset):
-    class Dataset:
-        def __init__(self):
-            self.dataset = wild_dataset
-
-        def __getitem__(self, idx):
-            x, y, metadata = self.dataset[idx]
-            return x, y
-
-        def __len__(self):
-            return len(self.dataset)
-
-    return Dataset()
 
 
 def get_dataset_names():
-    names = sorted(
-        name for name in datasets.__dict__
-        if not name.startswith("__") and callable(datasets.__dict__[name])
-    )
-                                 
-    if 'Office31' not in names:
-        names += ['Office31']
-    if 'OfficeHome' not in names:
-        names += ['OfficeHome']
-    # WILDS is optional and is not needed for the three paper benchmarks.
-    try:
-        import wilds
-    except ImportError:
-        wilds_names = []
-    else:
-        wilds_names = wilds.supported_datasets
-    return names + wilds_names + ['Digits']
+    return ['Office31', 'OfficeHome', 'VisDA2017']
 
 
 def get_dataset(dataset_name, root, source, target, train_source_transform, val_transform, train_target_transform=None):
     if train_target_transform is None:
         train_target_transform = train_source_transform
-    if dataset_name == "Digits":
-        train_source_dataset = datasets.__dict__[source[0]](osp.join(root, source[0]), download=True,
-                                                            transform=train_source_transform)
-        train_target_dataset = datasets.__dict__[target[0]](osp.join(root, target[0]), download=True,
-                                                            transform=train_target_transform)
-        val_dataset = test_dataset = datasets.__dict__[target[0]](osp.join(root, target[0]), split='test',
-                                                                  download=True, transform=val_transform)
-        class_names = datasets.MNIST.get_classes()
-        num_classes = len(class_names)
-    elif dataset_name in datasets.__dict__:
+    if dataset_name in datasets.__dict__:
                                                    
         dataset = datasets.__dict__[dataset_name]
 
@@ -174,18 +101,6 @@ def get_dataset(dataset_name, root, source, target, train_source_transform, val_
 
     return train_source_dataset, train_target_dataset, val_dataset, test_dataset, num_classes, class_names
 
-def print_dataset_image_names(concatenated_dataset):
-    for dataset in concatenated_dataset.datasets:
-        if hasattr(dataset, 'imgs'):
-            image_paths = [img[0] for img in dataset.imgs]  
-        elif hasattr(dataset, 'samples'):
-            image_paths = [sample[0] for sample in dataset.samples] 
-        else:
-            print("Unknown dataset structure, please check the dataset implementation.")
-            return
-        
-        for path in image_paths:
-            print(path)
 
 
                                                     
@@ -193,16 +108,7 @@ def get_ratio_dataset(dataset_name, root, source, target, train_source_transform
                       train_target_transform=None, ):
     if train_target_transform is None:
         train_target_transform = train_source_transform
-    if dataset_name == "Digits":
-        train_source_dataset = datasets.__dict__[source[0]](osp.join(root, source[0]), download=True,
-                                                            transform=train_source_transform)
-        train_target_dataset = datasets.__dict__[target[0]](osp.join(root, target[0]), download=True,
-                                                            transform=train_target_transform)
-        val_dataset = test_dataset = datasets.__dict__[target[0]](osp.join(root, target[0]), split='test',
-                                                                  download=True, transform=val_transform)
-        class_names = datasets.MNIST.get_classes()
-        num_classes = len(class_names)
-    elif dataset_name in datasets.__dict__:
+    if dataset_name in datasets.__dict__:
                                                    
         dataset = datasets.__dict__[dataset_name]
         dataset_ratio = datasets.__dict__[dataset_name + 'ratio']
@@ -238,10 +144,7 @@ def get_ratio_dataset(dataset_name, root, source, target, train_source_transform
         train_source_dataset = ConcatDataset([first_source_dataset, second_source_dataset])
         train_target_dataset = concat_dataset(root=root, tasks=target, download=download_flag, transform=train_target_transform)
         val_dataset = concat_dataset(root=root, tasks=target, download=download_flag, transform=val_transform)
-        if dataset_name == 'DomainNet':
-            test_dataset = concat_dataset(root=root, tasks=target, split='test', download=download_flag, transform=val_transform)
-        else:
-            test_dataset = val_dataset
+        test_dataset = val_dataset
         class_names = train_source_dataset.datasets[0].classes
         num_classes = len(class_names)
     else:
@@ -298,51 +201,6 @@ def validate(val_loader, model, args, device) -> float:
 
     return top1.avg
 
-def validate_weight(val_loader, model, args, device) -> float:
-    batch_time = AverageMeter('Time', ':6.3f')
-    losses = AverageMeter('Loss', ':.4e')
-    top1 = AverageMeter('Acc@1', ':6.2f')
-    progress = ProgressMeter(
-        len(val_loader),
-        [batch_time, losses, top1],
-        prefix='Test: ')
-
-                             
-    model.eval()
-    if args.per_class_eval:
-        confmat = ConfusionMatrix(len(args.class_names))
-    else:
-        confmat = None
-
-    with torch.no_grad():
-        end = time.time()
-        for i, (images, target, _) in enumerate(val_loader):
-            images = images.to(device)
-            target = target.to(device)
-
-                            
-            output = model(images)
-            loss = F.cross_entropy(output, target)
-
-                                              
-            acc1, = accuracy(output, target, topk=(1,))
-            if confmat:
-                confmat.update(target, output.argmax(1))
-            losses.update(loss.item(), images.size(0))
-            top1.update(acc1.item(), images.size(0))
-
-                                  
-            batch_time.update(time.time() - end)
-            end = time.time()
-
-            if i % args.print_freq == 0:
-                progress.display(i)
-
-        print(' * Acc@1 {top1.avg:.3f}'.format(top1=top1))
-        if confmat:
-            print(confmat.format(args.class_names))
-
-    return top1.avg
 
 
 def get_train_transform(resizing='default', random_horizontal_flip=True, random_color_jitter=False,
@@ -407,51 +265,3 @@ def get_val_transform(resizing='default', resize_size=224,
     ])
 
 
-def pretrain(train_source_iter, model, optimizer, lr_scheduler, epoch, args, device):
-    batch_time = AverageMeter('Time', ':3.1f')
-    data_time = AverageMeter('Data', ':3.1f')
-    losses = AverageMeter('Loss', ':3.2f')
-    cls_accs = AverageMeter('Cls Acc', ':3.1f')
-
-    progress = ProgressMeter(
-        args.iters_per_epoch,
-        [batch_time, data_time, losses, cls_accs],
-        prefix="Epoch: [{}]".format(epoch))
-
-                          
-    model.train()
-
-    end = time.time()
-    for i in range(args.iters_per_epoch):
-        x_s, labels_s = next(train_source_iter)
-        x_s = x_s.to(device)
-        labels_s = labels_s.to(device)
-
-                                   
-        data_time.update(time.time() - end)
-
-                        
-        y_s, f_s = model(x_s)
-
-        cls_loss = F.cross_entropy(y_s, labels_s)
-        loss = cls_loss
-
-        cls_acc = accuracy(y_s, labels_s)[0]
-        if args.log_results:
-            wandb.log({'iteration': epoch * args.iters_per_epoch + i, 'loss': loss})
-
-        losses.update(loss.item(), x_s.size(0))
-        cls_accs.update(cls_acc.item(), x_s.size(0))
-
-                                          
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-        lr_scheduler.step()
-
-                              
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        if i % args.print_freq == 0:
-            progress.display(i)
