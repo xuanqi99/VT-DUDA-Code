@@ -10,7 +10,9 @@ from diffusers import DPMSolverMultistepScheduler, StableDiffusionXLPipeline
 from diffusers.loaders import LoraLoaderMixin
 
 from ldm.modules.diffusionmodules.openaimodel_enc import Encoder4
-from synthesize_from_reference import TerraPatcher, _predict_eps, _prepare_sdxl_conditioning, latents_to_pil
+from synthesize_from_reference import (
+    TerraPatcher, _predict_eps, _prepare_sdxl_conditioning, adapter_strength_value, latents_to_pil,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_DIR = PROJECT_ROOT / "sd" / "models" / "stabilityai" / "stable-diffusion-xl-base-1.0" / "models--stabilityai--stable-diffusion-xl-base-1.0" / "snapshots"
@@ -26,6 +28,8 @@ def build_parser():
     parser.add_argument("--output_dir", type=str, default=str(PROJECT_ROOT / "outputs" / "noise_synthesis"))
     parser.add_argument("--device", type=str, default="cuda")
     parser.add_argument("--guidance_scale", type=float, default=7.5)
+    parser.add_argument("--adapter_strength", type=adapter_strength_value, default=1.0,
+                        help="Multiplier for LoRA weight updates during generation.")
     parser.add_argument("--cross_attn_scale", type=float, default=0.9)
     parser.add_argument("--concept_token_strength", type=float, default=1.0,
                         help="Multiplier applied to source visual tokens, independently of CFG and LoRA scales.")
@@ -105,7 +109,7 @@ def main():
 
     lora_state_dict, _ = LoraLoaderMixin.lora_state_dict(str(checkpoint_dir))
     patcher = TerraPatcher(pipe, lora_state_dict)
-    patcher.apply(time_t=1.0)
+    patcher.apply(time_t=1.0, adapter_strength=args.adapter_strength)
 
     encoder, token_count, embed_dim = load_concept_encoder(pipe, checkpoint_dir, device)
     image_transform = make_image_transform()

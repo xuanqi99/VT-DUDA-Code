@@ -1,4 +1,4 @@
-"""Train UDA on pairs of DDIM and class-conditioned source datasets."""
+"""Train UDA on DDIM/class dataset pairs with matching adapter strengths."""
 
 import argparse
 import itertools
@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from UDA.generated_data import dataset_classes, read_image_list
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
+ADAPTER_STRENGTHS = tuple(value / 10 for value in range(6, 11))
 
 
 def build_parser():
@@ -27,6 +28,8 @@ def build_parser():
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--methods", choices=["els", "mcc"], nargs="+", default=["els"])
     parser.add_argument("--seeds", type=int, nargs="+", default=[0])
+    parser.add_argument("--adapter-strengths", type=float, nargs="+", choices=ADAPTER_STRENGTHS,
+                        help="Select matching DDIM/class adapter strengths; defaults to all strengths in the manifest.")
     parser.add_argument("--ddim-token-strengths", type=float, nargs="+")
     parser.add_argument("--ddim-noise-levels", type=float, nargs="+")
     parser.add_argument("--class-token-strengths", type=float, nargs="+")
@@ -70,10 +73,12 @@ def generated_samples(image_root, classes):
     return samples
 
 
-def select_variants(manifest, pipeline, strengths=None, noise_levels=None):
+def select_variants(manifest, pipeline, strengths=None, noise_levels=None, adapter_strengths=None):
     variants = []
     for variant in manifest.get("variants", []):
         if variant.get("pipeline") != pipeline:
+            continue
+        if adapter_strengths and variant["adapter_strength"] not in adapter_strengths:
             continue
         if strengths and variant["token_strength"] not in strengths:
             continue
@@ -82,7 +87,8 @@ def select_variants(manifest, pipeline, strengths=None, noise_levels=None):
         variants.append(variant)
     if not variants:
         raise ValueError(f"No {pipeline} variants match the selected parameter values")
-    for field, selected in (("token_strength", strengths), ("noise_level", noise_levels)):
+    for field, selected in (("token_strength", strengths), ("noise_level", noise_levels),
+                            ("adapter_strength", adapter_strengths)):
         if selected and set(selected) - {variant.get(field) for variant in variants}:
             raise ValueError(f"Requested {pipeline} {field} values absent from the manifest")
     return variants
@@ -94,14 +100,40 @@ def write_image_list(path, samples):
 
 
 def make_plan(args, manifest):
-    if manifest.get("schema_version") != 1:
-        raise ValueError("Expected generation manifest schema_version 1")
+    schema_version = manifest.get("schema_version")
+    if schema_version not in (1, 2):
+        raise ValueError("Expected generation manifest schema_version 1 or 2")
+    variants = []
+    for variant in manifest.get("variants", []):
+        variant = dict(variant)
+        if schema_version == 2 and "adapter_strength" not in variant:
+            raise ValueError(f"Schema 2 variant is missing adapter_strength: {variant.get('id')}")
+        adapter_strength = float(variant.get("adapter_strength", 1.0))
+        if adapter_strength not in ADAPTER_STRENGTHS:
+            raise ValueError(f"Unsupported adapter strength {adapter_strength} in variant {variant.get('id')}")
+        variant["adapter_strength"] = adapter_strength
+        variants.append(variant)
+    manifest = dict(manifest, variants=variants)
     protected = {"--source-list", "--target-list", "--target-image-root", "--log", "--seed", "--gpu",
                  "-d", "--data", "-s", "--source", "-t", "--target"}
     if any(argument.split("=", 1)[0] in protected for argument in args.train_args):
         raise ValueError("--train-args cannot override dataset, log, seed or GPU options recorded by the grid")
-    ddim = select_variants(manifest, "ddim_inversion", args.ddim_token_strengths, args.ddim_noise_levels)
-    class_variants = select_variants(manifest, "class_condition", args.class_token_strengths)
+    ddim = select_variants(manifest, "ddim_inversion", args.ddim_token_strengths, args.ddim_noise_levels,
+                           args.adapter_strengths)
+    class_variants = select_variants(manifest, "class_condition", args.class_token_strengths,
+                                    adapter_strengths=args.adapter_strengths)
+    ddim_adapters = {variant["adapter_strength"] for variant in ddim}
+    class_adapters = {variant["adapter_strength"] for variant in class_variants}
+    if ddim_adapters != class_adapters:
+        raise ValueError("Selected DDIM and class variants must have matching adapter strengths; "
+                         f"DDIM-only: {sorted(ddim_adapters - class_adapters)}, "
+                         f"class-only: {sorted(class_adapters - ddim_adapters)}")
+    adapters = sorted(ddim_adapters)
+    pairs = [(ddim_variant, class_variant)
+             for adapter in adapters
+             for ddim_variant, class_variant in itertools.product(
+                 (variant for variant in ddim if variant["adapter_strength"] == adapter),
+                 (variant for variant in class_variants if variant["adapter_strength"] == adapter))]
     selected = ddim + class_variants
     ids = [variant["id"] for variant in selected]
     if len(ids) != len(set(ids)):
@@ -113,11 +145,12 @@ def make_plan(args, manifest):
     lists = {variant["id"]: output_root / "image_lists" / f"{variant['id']}.txt" for variant in selected}
     target_list = output_root / "image_lists" / "real_target.txt"
     runs = []
-    for method, seed, ddim_variant, class_variant in itertools.product(
-        dict.fromkeys(args.methods), dict.fromkeys(args.seeds), ddim, class_variants
+    for method, seed, (ddim_variant, class_variant) in itertools.product(
+        dict.fromkeys(args.methods), dict.fromkeys(args.seeds), pairs
     ):
+        adapter_strength = ddim_variant["adapter_strength"]
         run_id = f"{ddim_variant['id']}__{class_variant['id']}"
-        log_dir = output_root / method / f"seed_{seed}" / run_id
+        log_dir = output_root / f"adapter_{adapter_strength:.1f}" / method / f"seed_{seed}" / run_id
         if method == "mcc":
             entry = PROJECT_ROOT / "UDA/MCC/examples/domain_adaptation/image_classification/train_mcc.py"
         elif args.dataset == "VisDA2017":
@@ -132,15 +165,21 @@ def make_plan(args, manifest):
         if args.dataset == "VisDA2017":
             command.append("--per-class-eval")
         command.extend(args.train_args)
-        runs.append({"method": method, "seed": seed, "ddim_variant": ddim_variant["id"],
+        runs.append({"method": method, "seed": seed, "adapter_strength": adapter_strength,
+                     "ddim_variant": ddim_variant["id"],
                      "class_variant": class_variant["id"], "ddim_token_strength": ddim_variant["token_strength"],
                      "ddim_noise_level": ddim_variant["noise_level"], "class_token_strength": class_variant["token_strength"],
                      "source_lists": [str(lists[ddim_variant["id"]]), str(lists[class_variant["id"]])],
                      "target_list": str(target_list), "log_dir": str(log_dir), "command": command})
-    return {"schema_version": 1, "dataset": args.dataset, "generation_manifest": str(args.generation_manifest.resolve()),
-            "class_names": dataset_classes(args.dataset), "source_policy": "concatenate_one_ddim_and_one_class_variant",
+    return {"schema_version": 2, "dataset": args.dataset, "generation_manifest": str(args.generation_manifest.resolve()),
+            "generation_schema_version": schema_version, "adapter_strengths": adapters,
+            "adapter_groups": [{"adapter_strength": adapter,
+                                "combination_count": sum(ddim_variant["adapter_strength"] == adapter
+                                                         for ddim_variant, _ in pairs)} for adapter in adapters],
+            "class_names": dataset_classes(args.dataset),
+            "source_policy": "concatenate_one_ddim_and_one_class_variant_with_matching_adapter_strength",
             "target_policy": "real_target_labels_used_only_for_evaluation", "target_input_list": str(args.target_list.resolve()),
-            "target_image_root": str(args.target_image_root.resolve()), "combination_count": len(ddim) * len(class_variants),
+            "target_image_root": str(args.target_image_root.resolve()), "combination_count": len(pairs),
             "run_count": len(runs), "lists_prepared": False, "runs": runs}, selected, lists, target_list
 
 

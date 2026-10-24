@@ -1,4 +1,5 @@
 import argparse
+import math
 import os
 from typing import Dict, Tuple, Any
 from pathlib import Path         
@@ -44,19 +45,24 @@ class TerraPatcher:
 
     def reset(self):
                                             
-        for weight, dW in self._applied:
+        for weight, original in reversed(self._applied):
             with torch.no_grad():
-                weight.data -= dW
+                weight.copy_(original)
         self._applied.clear()
 
     @torch.no_grad()
-    def apply(self, time_t: float = 1.0):
+    def apply(self, time_t: float = 1.0, adapter_strength: float = 1.0):
         """
-        Apply Terra LoRA at given time t in {0, 1}:
+        Apply a scaled Terra LoRA update at time t in {0, 1}:
         dW = B @ (I + Ω * t)^T @ A, or dW = B @ A if Ω is absent.
         """
                                                                       
+        strength = float(adapter_strength)
+        if not math.isfinite(strength) or strength < 0:
+            raise ValueError("adapter_strength must be finite and nonnegative")
         self.reset()
+        if strength == 0:
+            return
 
                                                                 
         for k, a1 in list(self.unet_lora.items()):
@@ -86,10 +92,18 @@ class TerraPatcher:
             layer_key = k[len("unet."):] if k.startswith("unet.") else k
             target_layer = _target_layer_from_sd_name(layer_key)
             weight = getattr(eval(f"self.pipe.unet.{target_layer}"), "weight")
-            dW_cast = dW.to(self.pipe.unet.dtype).to(weight.device)
+            dW_cast = (strength * dW).to(self.pipe.unet.dtype).to(weight.device)
 
-            weight.data += dW_cast
-            self._applied.append((weight, dW_cast))
+            original = weight.detach().clone()
+            weight.add_(dW_cast)
+            self._applied.append((weight, original))
+
+
+def adapter_strength_value(value: str) -> float:
+    strength = float(value)
+    if not math.isfinite(strength) or strength < 0:
+        raise argparse.ArgumentTypeError("adapter strength must be finite and nonnegative")
+    return strength
 
 
 def preprocess_image(image_path: str, size: int = 1024, center_crop: bool = False, seed: int = 42) -> Tuple[torch.Tensor, Tuple[int, int]]:
@@ -396,6 +410,8 @@ def main():
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--num_inference_steps", type=int, default=25)
     parser.add_argument("--guidance_scale", type=float, default=7.5)
+    parser.add_argument("--adapter_strength", type=adapter_strength_value, default=1.0,
+                        help="Multiplier for LoRA weight updates during inversion and generation.")
                               
     parser.add_argument("--invert_guidance_scale", type=float, default=0.0, help="Guidance scale used only during DDIM inversion")
     parser.add_argument(
@@ -604,7 +620,7 @@ def main():
         generator = torch.Generator(device=device).manual_seed(s)
 
                                      
-        patcher.apply(time_t=float(args.t_noise))
+        patcher.apply(time_t=float(args.t_noise), adapter_strength=args.adapter_strength)
         prompt_embeds_inv, pooled_inv, added_cond_inv, do_cfg_inv = _prepare_sdxl_conditioning(
             pipe, class_prompt, args.invert_guidance_scale, device=device,
             dtype=pipe.unet.dtype, crop_coords=crop_coords, concept_tokens=concept_tokens                           
@@ -673,7 +689,7 @@ def main():
                 latents_start = pure_noise
 
                                         
-        patcher.apply(time_t=float(args.t_denoise))
+        patcher.apply(time_t=float(args.t_denoise), adapter_strength=args.adapter_strength)
 
                                                       
         if args.gen_uncond:

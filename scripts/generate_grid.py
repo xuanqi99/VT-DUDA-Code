@@ -11,6 +11,7 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 TOKEN_STRENGTHS = tuple(value / 10 for value in range(6, 16))
 NOISE_LEVELS = tuple(value / 10 for value in range(6, 11))
+ADAPTER_STRENGTHS = tuple(value / 10 for value in range(6, 11))
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
 
@@ -37,6 +38,8 @@ def build_parser():
                         default=list(TOKEN_STRENGTHS))
     parser.add_argument("--noise_levels", type=float, nargs="+", choices=NOISE_LEVELS,
                         default=list(NOISE_LEVELS))
+    parser.add_argument("--adapter_strengths", type=float, nargs="+", choices=ADAPTER_STRENGTHS,
+                        default=list(ADAPTER_STRENGTHS))
     parser.add_argument("--images_per_class", type=positive_int, default=50,
                         help="Images per class for each class-condition variant.")
     parser.add_argument("--reference_seeds", type=positive_int, default=1,
@@ -81,31 +84,35 @@ def source_classes(source_root, requested_classes=None):
 
 
 def build_variants(output_root, token_strengths=TOKEN_STRENGTHS, noise_levels=NOISE_LEVELS,
-                   pipeline="both"):
-    """Return 50 DDIM and 10 class-condition dataset variants by default."""
+                   pipeline="both", adapter_strengths=ADAPTER_STRENGTHS):
+    """Return 50 DDIM and 10 class-condition variants per adapter strength."""
     variants = []
-    for strength in sorted(set(token_strengths)):
-        if pipeline in ("both", "ddim_inversion"):
-            for noise in sorted(set(noise_levels)):
+    for adapter_strength in sorted(set(adapter_strengths)):
+        adapter_root = output_root / f"adapter_{adapter_strength:.1f}"
+        for strength in sorted(set(token_strengths)):
+            if pipeline in ("both", "ddim_inversion"):
+                for noise in sorted(set(noise_levels)):
+                    variants.append({
+                        "id": f"adapter_{adapter_strength:.1f}_ddim_token_{strength:.1f}_noise_{noise:.1f}",
+                        "pipeline": "ddim_inversion",
+                        "adapter_strength": adapter_strength,
+                        "token_strength": strength,
+                        "noise_level": noise,
+                        "image_root": str((adapter_root / "ddim_inversion" /
+                                           f"token_{strength:.1f}" / f"noise_{noise:.1f}").resolve()),
+                        "status": "planned",
+                    })
+            if pipeline in ("both", "class_condition"):
                 variants.append({
-                    "id": f"ddim_token_{strength:.1f}_noise_{noise:.1f}",
-                    "pipeline": "ddim_inversion",
+                    "id": f"adapter_{adapter_strength:.1f}_class_token_{strength:.1f}",
+                    "pipeline": "class_condition",
+                    "adapter_strength": adapter_strength,
                     "token_strength": strength,
-                    "noise_level": noise,
-                    "image_root": str((output_root / "ddim_inversion" /
-                                       f"token_{strength:.1f}" / f"noise_{noise:.1f}").resolve()),
+                    "noise_level": None,
+                    "image_root": str((adapter_root / "class_condition" /
+                                       f"token_{strength:.1f}").resolve()),
                     "status": "planned",
                 })
-        if pipeline in ("both", "class_condition"):
-            variants.append({
-                "id": f"class_token_{strength:.1f}",
-                "pipeline": "class_condition",
-                "token_strength": strength,
-                "noise_level": None,
-                "image_root": str((output_root / "class_condition" /
-                                   f"token_{strength:.1f}").resolve()),
-                "status": "planned",
-            })
     return variants
 
 
@@ -121,6 +128,7 @@ def commands_for_variant(args, variant, images):
     common = ["--base_model_id", args.base_model_id, "--device", args.device,
               "--num_inference_steps", str(args.num_inference_steps),
               "--guidance_scale", str(args.guidance_scale),
+              "--adapter_strength", str(variant["adapter_strength"]),
               "--concept_token_strength", str(variant["token_strength"])]
     image_root = Path(variant["image_root"])
     if variant["pipeline"] == "class_condition":
@@ -176,14 +184,15 @@ def main(argv=None):
     source_root = Path(args.source_root).resolve()
     if output_root == source_root or source_root in output_root.parents or output_root in source_root.parents:
         parser.error("--source_root and --output_root must be separate directories, with neither inside the other")
-    variants = build_variants(output_root, args.token_strengths, args.noise_levels, args.pipeline)
+    variants = build_variants(output_root, args.token_strengths, args.noise_levels,
+                              args.pipeline, args.adapter_strengths)
     reference_count = sum(len(paths) for paths in images.values())
     for variant in variants:
         variant["expected_images"] = (reference_count * args.reference_seeds
                                       if variant["pipeline"] == "ddim_inversion"
                                       else len(images) * args.images_per_class)
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "stage": "post_finetuning_generation",
         "status": "planned",
         "source_root": str(Path(args.source_root).resolve()),
@@ -192,6 +201,7 @@ def main(argv=None):
         "parameters": {key: value for key, value in vars(args).items() if key != "dry_run"},
         "ddim_noise_semantics": "(1-noise_level)*source_latent + noise_level*fully_inverted_latent; 1.0 uses the full inversion result",
         "class_condition_semantics": "class text prompt plus scaled source visual tokens from pure noise",
+        "adapter_strength_semantics": "multiplier on LoRA weight updates during inversion and generation",
         "variants": variants,
     }
     manifest_path = output_root / "generation_manifest.json"

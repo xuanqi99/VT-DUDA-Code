@@ -52,21 +52,24 @@ After fine-tuning, generate target-style datasets with the same checkpoint:
 python scripts/generate_grid.py \
   --checkpoint_dir checkpoints/Ar2Cl \
   --source_root data/OfficeHome/Art \
+  --adapter_strengths 0.6 0.7 0.8 0.9 1.0 \
   --output_root outputs/Ar2Cl
 ```
 
-| Pipeline | Token strength | Inversion noise level | Settings |
+| Pipeline | Token strength | Inversion noise level | Settings per adapter |
 | --- | --- | --- | --- |
 | DDIM inversion | `0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5` | `0.6 0.7 0.8 0.9 1.0` | 50 |
 | Class-conditioned generation | `0.6 0.7 0.8 0.9 1.0 1.1 1.2 1.3 1.4 1.5` | — | 10 |
 
+Each adapter strength has 50 DDIM inversion and 10 class-conditioned settings: **250 DDIM and 50 class-conditioned datasets** in total. Adapter strength scales LoRA weight updates during inversion and generation.
+
 DDIM inversion uses source visual tokens; class-conditioned generation uses the class prompt together with source visual tokens. Noise level `1.0` uses the full DDIM inversion result.
 
-Each DDIM setting translates all source images. Class-conditioned generation produces 50 images per class by default; use `--images_per_class 1000` for VisDA. Outputs are grouped by parameters and class, with their settings recorded in `generation_manifest.json`.
+Each DDIM setting translates all source images. Class-conditioned generation produces 50 images per class by default; use `--images_per_class 1000` for VisDA. Outputs are grouped under `adapter_0.6/` through `adapter_1.0/`, then by parameters and class. Settings are recorded in `generation_manifest.json`.
 
 ## Downstream UDA
 
-Train ELS and MCC on the 500 combinations of one DDIM dataset and one class-conditioned dataset:
+Pair DDIM and class-conditioned datasets with the same adapter strength: **500 pairs per strength, 2,500 per method and seed**. Train ELS and MCC with:
 
 ```bash
 python scripts/train_uda_grid.py \
@@ -79,6 +82,8 @@ python scripts/train_uda_grid.py \
 ```
 
 Use `--dataset Office31` or `--dataset VisDA2017` with the corresponding target list for the other benchmarks. ELS retains its default epsilon sweep. To choose one epsilon, run ELS separately with `--methods els --train-args --eps 0.1`.
+
+Use `--adapter_strengths 0.8` for a single generation group and `--adapter-strengths 0.8` for its UDA runs.
 
 Each run's command and log directory are saved in `uda_manifest.json`. For evaluation, use that command with `--phase test` and the trained run's `--log` directory. For ELS, also select the matching `--eps` and epsilon subdirectory. VisDA reports per-class accuracy and mean accuracy.
 
