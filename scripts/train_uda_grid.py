@@ -1,4 +1,4 @@
-"""Train UDA on DDIM/class dataset pairs with matching adapter strengths."""
+"""Train UDA on DDIM/class pairs with matching adapter and token strengths."""
 
 import argparse
 import itertools
@@ -30,9 +30,11 @@ def build_parser():
     parser.add_argument("--seeds", type=int, nargs="+", default=[0])
     parser.add_argument("--adapter-strengths", type=float, nargs="+", choices=ADAPTER_STRENGTHS,
                         help="Select matching DDIM/class adapter strengths; defaults to all strengths in the manifest.")
-    parser.add_argument("--ddim-token-strengths", type=float, nargs="+")
+    parser.add_argument("--ddim-token-strengths", type=float, nargs="+",
+                        help="Token strengths to pair; must match the selected class token strengths.")
     parser.add_argument("--ddim-noise-levels", type=float, nargs="+")
-    parser.add_argument("--class-token-strengths", type=float, nargs="+")
+    parser.add_argument("--class-token-strengths", type=float, nargs="+",
+                        help="Token strengths to pair; must match the selected DDIM token strengths.")
     parser.add_argument("--gpu", default="0")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--dry-run", action="store_true", help="Write the plan without loading images or running training (default).")
@@ -122,18 +124,25 @@ def make_plan(args, manifest):
                            args.adapter_strengths)
     class_variants = select_variants(manifest, "class_condition", args.class_token_strengths,
                                     adapter_strengths=args.adapter_strengths)
-    ddim_adapters = {variant["adapter_strength"] for variant in ddim}
-    class_adapters = {variant["adapter_strength"] for variant in class_variants}
-    if ddim_adapters != class_adapters:
-        raise ValueError("Selected DDIM and class variants must have matching adapter strengths; "
-                         f"DDIM-only: {sorted(ddim_adapters - class_adapters)}, "
-                         f"class-only: {sorted(class_adapters - ddim_adapters)}")
-    adapters = sorted(ddim_adapters)
-    pairs = [(ddim_variant, class_variant)
-             for adapter in adapters
-             for ddim_variant, class_variant in itertools.product(
-                 (variant for variant in ddim if variant["adapter_strength"] == adapter),
-                 (variant for variant in class_variants if variant["adapter_strength"] == adapter))]
+    ddim_keys = {(variant["adapter_strength"], variant["token_strength"]) for variant in ddim}
+    class_by_key = {}
+    for variant in class_variants:
+        key = (variant["adapter_strength"], variant["token_strength"])
+        if key in class_by_key:
+            raise ValueError(f"Duplicate class variant for adapter/token strengths {key}")
+        class_by_key[key] = variant
+    class_keys = set(class_by_key)
+    if ddim_keys != class_keys:
+        raise ValueError("Selected DDIM and class variants must match both adapter and token strengths; "
+                         f"DDIM-only (adapter, token): {sorted(ddim_keys - class_keys)}, "
+                         f"class-only (adapter, token): {sorted(class_keys - ddim_keys)}")
+    ddim_settings = [(variant["adapter_strength"], variant["token_strength"], variant["noise_level"])
+                     for variant in ddim]
+    if len(ddim_settings) != len(set(ddim_settings)):
+        raise ValueError("Duplicate DDIM variant for adapter/token/noise settings")
+    adapters = sorted({adapter for adapter, _ in ddim_keys})
+    pairs = [(variant, class_by_key[(variant["adapter_strength"], variant["token_strength"])])
+             for variant in ddim]
     selected = ddim + class_variants
     ids = [variant["id"] for variant in selected]
     if len(ids) != len(set(ids)):
@@ -177,7 +186,7 @@ def make_plan(args, manifest):
                                 "combination_count": sum(ddim_variant["adapter_strength"] == adapter
                                                          for ddim_variant, _ in pairs)} for adapter in adapters],
             "class_names": dataset_classes(args.dataset),
-            "source_policy": "concatenate_one_ddim_and_one_class_variant_with_matching_adapter_strength",
+            "source_policy": "concatenate_one_ddim_and_one_class_variant_with_matching_adapter_and_token_strengths",
             "target_policy": "real_target_labels_used_only_for_evaluation", "target_input_list": str(args.target_list.resolve()),
             "target_image_root": str(args.target_image_root.resolve()), "combination_count": len(pairs),
             "run_count": len(runs), "lists_prepared": False, "runs": runs}, selected, lists, target_list

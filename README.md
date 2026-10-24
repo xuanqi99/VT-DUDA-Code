@@ -69,7 +69,7 @@ Each DDIM setting translates all source images. Class-conditioned generation pro
 
 ## Downstream UDA
 
-Pair DDIM and class-conditioned datasets with the same adapter strength: **500 pairs per strength, 2,500 per method and seed**. Train ELS and MCC with:
+Pair DDIM and class-conditioned datasets with the same adapter strength and token strength: **5 adapter strengths × 5 noise levels × 10 token strengths = 250 pairs per method and seed**. Each class-conditioned dataset is paired with the five DDIM noise levels at its matching strengths. Train ELS and MCC with:
 
 ```bash
 python scripts/train_uda_grid.py \
