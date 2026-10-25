@@ -89,7 +89,7 @@ Each run's command and log directory are saved in `uda_manifest.json`. For evalu
 
 ## Licensing and third-party code
 
-See the proposed [MIT LICENSE](LICENSE) for original contributions **only to the extent their copyright holder is authorized to license them**, and [THIRD_PARTY.md](THIRD_PARTY.md) for incorporated code, retained upstream licenses, required notices, and **outstanding rights checks**. This is a mixed-origin codebase; the root license does not replace upstream MIT/Apache-2.0 terms or establish permission for ELS-specific contributions whose authorization remains to be confirmed. SDXL model weights and datasets have separate terms.
+Original VT-DUDA contributions are released under the [MIT License](LICENSE) by Xuan Qi. Reused code retains its original copyright notices and license terms; see [THIRD_PARTY.md](THIRD_PARTY.md) and the [upstream license texts](licenses/). **ELS-specific code is used with permission**, following the same arrangement as [MUSE-Code](https://github.com/xuanqi99/MUSE-Code), and is not being relicensed as original VT-DUDA code. The SDXL pretrained model weights and benchmark datasets are governed by separate terms.
 
 ## Citation
 
