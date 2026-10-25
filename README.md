@@ -87,6 +87,10 @@ Use `--adapter_strengths 0.8` for a single generation group and `--adapter-stren
 
 Each run's command and log directory are saved in `uda_manifest.json`. For evaluation, use that command with `--phase test` and the trained run's `--log` directory. For ELS, also select the matching `--eps` and epsilon subdirectory. VisDA reports per-class accuracy and mean accuracy.
 
+## Licensing and third-party code
+
+Original VT-DUDA contributions are released under the [MIT License](LICENSE) by Xuan Qi. Reused code retains its original copyright notices and license terms; see [THIRD_PARTY.md](THIRD_PARTY.md) and the [upstream license texts](licenses/). **ELS-specific code is used with permission**, following the same arrangement as [MUSE-Code](https://github.com/xuanqi99/MUSE-Code), and is not being relicensed as original VT-DUDA code. The SDXL pretrained model weights and benchmark datasets are governed by separate terms.
+
 ## Citation
 
 ```bibtex
