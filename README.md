@@ -87,6 +87,10 @@ Use `--adapter_strengths 0.8` for a single generation group and `--adapter-stren
 
 Each run's command and log directory are saved in `uda_manifest.json`. For evaluation, use that command with `--phase test` and the trained run's `--log` directory. For ELS, also select the matching `--eps` and epsilon subdirectory. VisDA reports per-class accuracy and mean accuracy.
 
+## Licensing and third-party code
+
+See the proposed [MIT LICENSE](LICENSE) for original contributions **only to the extent their copyright holder is authorized to license them**, and [THIRD_PARTY.md](THIRD_PARTY.md) for incorporated code, retained upstream licenses, required notices, and **outstanding rights checks**. This is a mixed-origin codebase; the root license does not replace upstream MIT/Apache-2.0 terms or establish permission for ELS-specific contributions whose authorization remains to be confirmed. SDXL model weights and datasets have separate terms.
+
 ## Citation
 
 ```bibtex
